@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D ULD 화물 탑재 시뮬레이터</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; margin: 0; overflow: hidden; background-color: #f3f4f6; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        #ui-panel { position: absolute; top: 20px; left: 20px; z-index: 10; max-height: calc(100vh - 40px); overflow-y: auto; }
+        .glass-panel { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); }
+        /* 스크롤바 커스텀 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body>
+
+    <!-- 좌측 UI 패널 -->
+    <div id="ui-panel" class="glass-panel w-80 p-6 rounded-2xl shadow-xl flex flex-col gap-5">
+        <div>
+            <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                ✈️ 화물 탑재 시뮬레이터
+            </h1>
+            <p class="text-xs text-gray-500 mt-1">항공편 및 화물 규격을 입력하여 탑재 가능 여부를 3D로 확인하세요.</p>
+        </div>
+
+        <!-- 항공편 선택 -->
+        <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">항공편 (Flight)</label>
+            <select id="flight-id" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
+                <option value="JL6708">JL6708 (B787 여객기)</option>
+                <option value="JL6752">JL6752 (B787 여객기)</option>
+                <option value="JL6750-MD">JL6750 (B767F 화물기 - Main Deck)</option>
+                <option value="JL6750-LD">JL6750 (B767F 화물기 - Lower Deck)</option>
+                <option value="JL090">JL090 (B787 여객기)</option>
+                <option value="JL092">JL092 (B787 여객기)</option>
+                <option value="JL094">JL094 (B787 여객기)</option>
+            </select>
+            <div id="flight-desc" class="text-xs text-blue-600 mt-2 bg-blue-50 p-2 rounded-md leading-relaxed">
+                <!-- 항공편 정보가 여기에 표시됩니다 -->
+            </div>
+        </div>
+
+        <!-- 화물 규격 입력 -->
+        <div class="border-t border-gray-200 pt-4">
+            <label class="block text-sm font-medium text-gray-700 mb-3">화물 1피스 규격 (cm)</label>
+            <div class="grid grid-cols-3 gap-2">
+                <div>
+                    <label class="text-xs text-gray-500 text-center block mb-1">가로(L) cm</label>
+                    <input type="number" id="cargo-l" class="w-full border border-gray-300 rounded-lg p-2 text-center text-sm focus:ring-2 focus:ring-blue-500 outline-none" value="120" min="1">
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 text-center block mb-1">세로(W) cm</label>
+                    <input type="number" id="cargo-w" class="w-full border border-gray-300 rounded-lg p-2 text-center text-sm focus:ring-2 focus:ring-blue-500 outline-none" value="80" min="1">
+                </div>
+                <div>
+                    <label class="text-xs text-gray-500 text-center block mb-1">높이(H) cm</label>
+                    <input type="number" id="cargo-h" class="w-full border border-gray-300 rounded-lg p-2 text-center text-sm focus:ring-2 focus:ring-blue-500 outline-none" value="100" min="1">
+                </div>
+            </div>
+            <!-- 옵션 선택 (눕히기 및 서포트) -->
+            <div class="mt-3 flex items-center justify-between border border-gray-200 p-2 rounded-lg bg-white shadow-sm">
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="allow-tilt" class="w-4 h-4 text-blue-600 rounded cursor-pointer">
+                    <label for="allow-tilt" class="text-xs text-gray-700 cursor-pointer select-none">눕히기 허용</label>
+                </div>
+                <div class="flex items-center gap-1">
+                    <label class="text-xs text-gray-700 font-medium" title="오버행을 위해 화물 아래에 받치는 서포트 두께">서포트(cm)</label>
+                    <input type="number" id="shoring-h" class="w-16 border border-gray-300 rounded p-1 text-center text-xs outline-none focus:ring-1 focus:ring-blue-500" value="0" min="0">
+                </div>
+            </div>
+        </div>
+
+        <!-- 시뮬레이션 버튼 -->
+        <button id="simulate-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg shadow-md transition-all active:scale-95">
+            탑재 확인하기
+        </button>
+
+        <!-- 결과 메시지 영역 -->
+        <div id="result-box" class="hidden rounded-lg p-4 text-sm font-medium flex flex-col gap-2">
+            <div id="result-title" class="text-lg font-bold"></div>
+            <div id="result-desc" class="text-gray-700 text-xs leading-relaxed"></div>
+        </div>
+       
+        <div class="mt-auto pt-4 text-center">
+            <p class="text-[10px] text-gray-400">마우스 좌클릭: 회전 / 우클릭: 이동 / 휠: 확대축소</p>
+        </div>
+    </div>
+
+    <!-- 3D 캔버스 영역 -->
+    <div id="canvas-container"></div>
+
+    <script>
+        // --- 1. Three.js 기본 설정 ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf0f4f8);
+        scene.fog = new THREE.Fog(0xf0f4f8, 500, 1500);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 3000);
+        camera.position.set(500, 400, 500);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 - 0.01;
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        dirLight.position.set(300, 600, 400);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 400;
+        dirLight.shadow.camera.bottom = -400;
+        dirLight.shadow.camera.left = -400;
+        dirLight.shadow.camera.right = 400;
+        dirLight.shadow.camera.near = 0.1;
+        dirLight.shadow.camera.far = 2000;
+        scene.add(dirLight);
+
+        const gridHelper = new THREE.GridHelper(1000, 100, 0x888888, 0xcccccc);
+        scene.add(gridHelper);
+
+        const planeGeo = new THREE.PlaneGeometry(1000, 1000);
+        const planeMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, depthWrite: false });
+        const plane = new THREE.Mesh(planeGeo, planeMat);
+        plane.rotation.x = -Math.PI / 2;
+        plane.receiveShadow = true;
+        scene.add(plane);
+
+        let uldGroup = null;
+        let cargoGroup = null;
+
+        // --- 2. 데이터 정의 (Flight & ULD) ---
+        const FLIGHT_DATA = {
+            'JL6708': { ac: 'B787 여객기', ulds: ['AKE', 'PLA', 'PMC'], overhang: true, maindeck: false, deck: 'Lower Deck' },
+            'JL6752': { ac: 'B787 여객기', ulds: ['AKE', 'PLA', 'PMC'], overhang: true, maindeck: false, deck: 'Lower Deck' },
+            'JL6750-MD': { ac: 'B767F 화물기', ulds: ['PAG(MD-SBS)', 'PMC(MD-Center)'], overhang: false, maindeck: true, deck: 'Main Deck' },
+            'JL6750-LD': { ac: 'B767F 화물기', ulds: ['AKE', 'DQF', 'PAG', 'PMC'], overhang: false, maindeck: false, deck: 'Lower Deck' },
+            'JL090': { ac: 'B787 여객기', ulds: ['AKE', 'PLA', 'PMC'], overhang: true, maindeck: false, deck: 'Lower Deck' },
+            'JL092': { ac: 'B787 여객기', ulds: ['AKE', 'PLA', 'PMC'], overhang: true, maindeck: false, deck: 'Lower Deck' },
+            'JL094': { ac: 'B787 여객기', ulds: ['AKE', 'PLA', 'PMC'], overhang: true, maindeck: false, deck: 'Lower Deck' }
+        };
+
+        // InnerW, InnerD 속성을 추가하여 네트 체결부 및 엣지 레일로 인해 제한되는 "순수 탑재 공간" 정의
+        const ULD_SPECS = {
+            'AKE': { label: 'AKE 컨테이너', baseW: 156, baseD: 153, height: 163, hasOverhang: true, overhangW: 200, overhangStartH: 114 },
+            'DQF': { label: 'DQF 컨테이너', baseW: 244, baseD: 153, height: 163, hasOverhang: true, overhangW: 317, overhangStartH: 114 },
+            'PLA': { label: 'PLA 파렛트', baseW: 317, baseD: 153, innerW: 294, innerD: 130, height: 163, hasOverhang: true, overhangW: 329 },
+            'PAG': { label: 'PAG 파렛트', baseW: 317, baseD: 223, innerW: 294, innerD: 200, height: 163, maindeckHeight: 244, hasOverhang: true, overhangW: 329 },
+            'PMC': { label: 'PMC 파렛트', baseW: 317, baseD: 244, innerW: 294, innerD: 220, height: 163, maindeckHeight: 244, hasOverhang: true, overhangW: 329 },
+            'PAG(MD-SBS)': { label: 'PAG 파렛트 (Side-by-Side)', baseW: 317.5, baseD: 223.5, innerW: 294, innerD: 200, height: 240, isMain: true, hasOverhang: false },
+            'PMC(MD-Center)': { label: 'PMC 파렛트 (Center Loading)', baseW: 317.5, baseD: 243.8, innerW: 294, innerD: 220, height: 240, isMain: true, hasOverhang: false }
+        };
+
+        const MIN_SHORING_FOR_OVERHANG = 5; // 파렛트 엣지 간섭을 피하기 위한 최소 서포트 두께
+
+        function getPAMaxWidth(h) {
+            if (h <= 108.4) return 223.5;
+            if (h <= 157.4) return 223.5 + (199.1 - 223.5) * ((h - 108.4) / (157.4 - 108.4));
+            if (h <= 207.7) return 199.1 + (160.5 - 199.1) * ((h - 157.4) / (207.7 - 157.4));
+            if (h <= 243.8) return 160.5 + (114.3 - 160.5) * ((h - 207.7) / (243.8 - 207.7));
+            return 0;
+        }
+
+        // --- 3. ULD 생성 함수 ---
+        function createULD(type, flightId) {
+            if (uldGroup) {
+                scene.remove(uldGroup);
+                uldGroup = null;
+            }
+            uldGroup = new THREE.Group();
+
+            const spec = ULD_SPECS[type];
+            const flight = FLIGHT_DATA[flightId];
+           
+            const useOverhang = spec.hasOverhang && flight.overhang;
+            const maxHeight = (flight.maindeck && spec.maindeckHeight) ? spec.maindeckHeight : spec.height;
+            const isPallet = ['PMC', 'PAG', 'PLA', 'PAG(MD-SBS)', 'PMC(MD-Center)'].includes(type);
+
+            if (isPallet) {
+                // 1. 파렛트 외부 바닥면 (External base)
+                const baseGeo = new THREE.BoxGeometry(spec.baseW, 4, spec.baseD);
+                baseGeo.translate(0, 2, 0);
+                const baseMat = new THREE.MeshStandardMaterial({ color: 0x9ca3af, roughness: 0.7 });
+                const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+                const baseEdges = new THREE.EdgesGeometry(baseGeo);
+                const baseLine = new THREE.LineSegments(baseEdges, new THREE.LineBasicMaterial({ color: 0x4b5563, linewidth: 2 }));
+                baseMesh.add(baseLine);
+                uldGroup.add(baseMesh);
+
+                // 2. 파렛트 Inner 구역 (안전선 표시)
+                const innerGeo = new THREE.PlaneGeometry(spec.innerW, spec.innerD);
+                innerGeo.rotateX(-Math.PI / 2);
+                innerGeo.translate(0, 4.1, 0); // 바닥보다 살짝 위
+                const innerMat = new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.1, depthWrite: false });
+                const innerMesh = new THREE.Mesh(innerGeo, innerMat);
+               
+                // 점선 경계선 추가
+                const innerEdges = new THREE.EdgesGeometry(innerGeo);
+                const innerLine = new THREE.LineSegments(innerEdges, new THREE.LineDashedMaterial({ color: 0x059669, dashSize: 5, gapSize: 5, linewidth: 2 }));
+                innerLine.computeLineDistances();
+                innerMesh.add(innerLine);
+                uldGroup.add(innerMesh);
+
+                // 3. 최대 허용 윤곽 (Contour / Volume)
+                let volGeo;
+                let isCutout = false;
+
+                if (type === 'PAG(MD-SBS)') {
+                    isCutout = true;
+                    const shape = new THREE.Shape();
+                    const left = -spec.baseD / 2;
+                   
+                    shape.moveTo(left, 0);
+                    shape.lineTo(left + 223.5, 0);
+                    shape.lineTo(left + 223.5, 108.4);
+                    shape.lineTo(left + 199.1, 157.4);
+                    shape.lineTo(left + 160.5, 207.7);
+                   
+                    const wTop = getPAMaxWidth(spec.height);
+                    shape.lineTo(left + wTop, spec.height);
+                    shape.lineTo(left, spec.height);
+                    shape.lineTo(left, 0);
+                   
+                    const extrudeSettings = { depth: spec.baseW, bevelEnabled: false };
+                    volGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                    volGeo.translate(0, 0, -spec.baseW / 2);
+                    volGeo.rotateY(-Math.PI / 2); // 317.5(긴 쪽)가 X축을 향하도록 Z-X 평면으로 90도 회전
+
+                } else if (useOverhang) {
+                    const shape = new THREE.Shape();
+                    const hb = spec.baseW / 2;
+                    const ho = spec.overhangW / 2;
+                    const stepY = MIN_SHORING_FOR_OVERHANG;
+                   
+                    shape.moveTo(-hb, 0);
+                    shape.lineTo(hb, 0);
+                    shape.lineTo(hb, stepY);
+                    shape.lineTo(ho, stepY);
+                    shape.lineTo(ho, maxHeight);
+                    shape.lineTo(-ho, maxHeight);
+                    shape.lineTo(-ho, stepY);
+                    shape.lineTo(-hb, stepY);
+                    shape.lineTo(-hb, 0);
+                   
+                    const extrudeSettings = { depth: spec.baseD, bevelEnabled: false };
+                    volGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                    volGeo.translate(0, 0, -spec.baseD / 2);
+                } else {
+                    const heightToUse = spec.isMain ? spec.height : maxHeight;
+                    volGeo = new THREE.BoxGeometry(spec.baseW, heightToUse, spec.baseD);
+                    volGeo.translate(0, heightToUse / 2, 0);
+                }
+               
+                const volMat = new THREE.MeshStandardMaterial({
+                    color: isCutout ? 0x8b5cf6 : 0x60a5fa,
+                    transparent: true,
+                    opacity: isCutout ? 0.15 : 0.08,
+                    side: THREE.DoubleSide,
+                    depthWrite: false
+                });
+                const volMesh = new THREE.Mesh(volGeo, volMat);
+                const volEdges = new THREE.EdgesGeometry(volGeo);
+                const edgeColor = isCutout ? 0x6d28d9 : 0x3b82f6;
+                const volLine = new THREE.LineSegments(volEdges, new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: isCutout ? 0.6 : 0.3, linewidth: 2 }));
+                volMesh.add(volLine);
+                uldGroup.add(volMesh);
+
+            } else {
+                let geometry;
+                if (useOverhang && (type === 'AKE' || type === 'DQF')) {
+                    const shape = new THREE.Shape();
+                    const halfBase = spec.baseW / 2;
+
+                    if (type === 'AKE') {
+                        const rightMax = halfBase + (spec.overhangW - spec.baseW);
+                        shape.moveTo(-halfBase, 0);
+                        shape.lineTo(halfBase, 0);  
+                        shape.lineTo(halfBase, spec.overhangStartH);
+                        shape.lineTo(rightMax, spec.overhangStartH);
+                        shape.lineTo(rightMax, maxHeight);
+                        shape.lineTo(-halfBase, maxHeight);
+                        shape.lineTo(-halfBase, 0);
+                    } else if (type === 'DQF') {
+                        const halfTop = spec.overhangW / 2;
+                        shape.moveTo(-halfBase, 0);
+                        shape.lineTo(halfBase, 0);
+                        shape.lineTo(halfBase, spec.overhangStartH);
+                        shape.lineTo(halfTop, spec.overhangStartH);
+                        shape.lineTo(halfTop, maxHeight);
+                        shape.lineTo(-halfTop, maxHeight);
+                        shape.lineTo(-halfTop, spec.overhangStartH);
+                        shape.lineTo(-halfBase, spec.overhangStartH);
+                        shape.lineTo(-halfBase, 0);
+                    }
+                    const extrudeSettings = { depth: spec.baseD, bevelEnabled: false };
+                    geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                    geometry.translate(0, 0, -spec.baseD / 2);
+                } else {
+                    geometry = new THREE.BoxGeometry(spec.baseW, maxHeight, spec.baseD);
+                    geometry.translate(0, maxHeight / 2, 0);
+                }
+
+                const material = new THREE.MeshStandardMaterial({
+                    color: 0x3b82f6, transparent: true, opacity: 0.15,
+                    side: THREE.DoubleSide, depthWrite: false
+                });
+               
+                const mesh = new THREE.Mesh(geometry, material);
+                const edges = new THREE.EdgesGeometry(geometry);
+                const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x1d4ed8, linewidth: 2 }));
+                mesh.add(line);
+                uldGroup.add(mesh);
+            }
+            scene.add(uldGroup);
+        }
+
+        // --- 4. 탑재 가능 여부 계산 로직 ---
+        function getOrientations(l, w, h, allowTilt) {
+            if (allowTilt) {
+                return [
+                    {x: l, y: h, z: w, label: '가로 ' + l + ', 세로 ' + w + ', 높이 ' + h + ' (정방향)'},
+                    {x: l, y: w, z: h, label: '가로 ' + l + ', 세로 ' + h + ', 높이 ' + w + ' (눕힘)'},
+                    {x: w, y: h, z: l, label: '가로 ' + w + ', 세로 ' + l + ', 높이 ' + h + ' (90도 회전)'},
+                    {x: w, y: l, z: h, label: '가로 ' + w + ', 세로 ' + h + ', 높이 ' + l + ' (눕힘 및 회전)'},
+                    {x: h, y: l, z: w, label: '가로 ' + h + ', 세로 ' + w + ', 높이 ' + l + ' (측면으로 세움)'},
+                    {x: h, y: w, z: l, label: '가로 ' + h + ', 세로 ' + l + ', 높이 ' + w + ' (측면으로 세움 및 회전)'}
+                ];
+            } else {
+                return [
+                    {x: l, y: h, z: w, label: '가로 ' + l + ', 세로 ' + w + ', 높이 ' + h + ' (정방향)'},
+                    {x: w, y: h, z: l, label: '가로 ' + w + ', 세로 ' + l + ', 높이 ' + h + ' (90도 회전)'}
+                ];
+            }
+        }
+
+        function checkFitForFlight(l, w, h, flightId, allowTilt, shoringHeight) {
+            const flight = FLIGHT_DATA[flightId];
+            const orientations = getOrientations(l, w, h, allowTilt);
+            const availableUlds = flight.ulds;
+
+            for (let i = 0; i < availableUlds.length; i++) {
+                let uldType = availableUlds[i];
+                const spec = ULD_SPECS[uldType];
+                const maxHeight = (flight.maindeck && spec.maindeckHeight) ? spec.maindeckHeight : spec.height;
+                const useOverhang = spec.hasOverhang && flight.overhang;
+                const isPallet = ['PMC', 'PAG', 'PLA', 'PAG(MD-SBS)', 'PMC(MD-Center)'].includes(uldType);
+
+                for (let j = 0; j < orientations.length; j++) {
+                    let ori = orientations[j];
+                   
+                    // 핵심 수정: Inner 공간 초과 검사 (파렛트 엣지 레일 간섭)
+                    let exceedsInner = false;
+                    if (isPallet) {
+                        if (ori.x > spec.innerW || ori.z > spec.innerD) {
+                            exceedsInner = true;
+                        }
+                    }
+
+                    // Inner를 초과했는데 서포트가 최소 요구치(5cm) 미만이면 물리적으로 파렛트 바닥에 밀착할 수 없음
+                    if (exceedsInner && shoringHeight < MIN_SHORING_FOR_OVERHANG) {
+                        continue;
+                    }
+
+                    if (uldType === 'PAG(MD-SBS)') {
+                        const yMax = ori.y + shoringHeight;
+                        const wMax = getPAMaxWidth(yMax);
+                       
+                        // X축이 긴 쪽(317.5), Z축이 짧은 곡면 쪽(223.5)이므로 ori.z를 곡면 폭(wMax)과 비교
+                        if (ori.x <= spec.baseW && ori.z <= wMax && yMax <= spec.height) {
+                            const leftWallZ = -(spec.baseD / 2);
+                            const posZ = leftWallZ + (ori.z / 2);
+                           
+                            let methodText = 'Side-by-Side 곡면 회피 기본 적재';
+                            if (exceedsInner) methodText = `Inner 초과 적재 (서포트 ${shoringHeight}cm 반영)`;
+                            else if (shoringHeight > 0) methodText = `Side-by-Side 곡면 회피 (서포트 포함)`;
+
+                            return {
+                                fits: true, uld: uldType, ori: ori,
+                                posX: 0, posY: shoringHeight + (ori.y / 2), posZ: posZ,
+                                method: methodText,
+                                requiresShoring: shoringHeight > 0, shoringHeight: shoringHeight, shoringWidth: ori.x
+                            };
+                        }
+                    } else if (uldType === 'PMC(MD-Center)') {
+                        if (ori.x <= spec.baseW && ori.z <= spec.baseD && (ori.y + shoringHeight) <= spec.height) {
+                            let methodText = 'Center Loading 기본 적재';
+                            if (exceedsInner) methodText = `Inner 초과 적재 (서포트 ${shoringHeight}cm 반영)`;
+                            else if (shoringHeight > 0) methodText = `Center Loading (서포트 포함)`;
+
+                            return {
+                                fits: true, uld: uldType, ori: ori,
+                                posX: 0, posY: shoringHeight + (ori.y / 2), posZ: 0,
+                                method: methodText,
+                                requiresShoring: shoringHeight > 0, shoringHeight: shoringHeight, shoringWidth: ori.x
+                            };
+                        }
+                    } else {
+                        // 로어데크 기본 적재 (Inner 한계 포함)
+                        if (ori.x <= spec.baseW && ori.z <= spec.baseD && (ori.y + shoringHeight) <= maxHeight) {
+                            let methodText = '바닥 기본 적재';
+                            if (exceedsInner) methodText = `Inner 초과 적재 (서포트 ${shoringHeight}cm 반영)`;
+                            else if (shoringHeight > 0) methodText = `바닥 적재 (서포트 포함)`;
+
+                            return {
+                                fits: true, uld: uldType, ori: ori,
+                                posX: 0, posY: shoringHeight + (ori.y / 2), posZ: 0,
+                                method: methodText,
+                                requiresShoring: shoringHeight > 0, shoringHeight: shoringHeight, shoringWidth: ori.x
+                            };
+                        }
+
+                        // 로어데크 파렛트 폭 오버행
+                        if (useOverhang) {
+                            if (uldType === 'AKE') {
+                                if (ori.x <= spec.overhangW && ori.z <= spec.baseD && ori.y <= (maxHeight - spec.overhangStartH)) {
+                                    const centerOfTop = (-spec.baseW/2 + (spec.baseW/2 + (spec.overhangW - spec.baseW))) / 2;
+                                    return { fits: true, uld: uldType, ori: ori, posX: centerOfTop, posY: spec.overhangStartH + (ori.y / 2), posZ: 0, method: '상단 적재(오버행 활용)' };
+                                }
+                            } else if (uldType === 'DQF') {
+                                if (ori.x <= spec.overhangW && ori.z <= spec.baseD && ori.y <= (maxHeight - spec.overhangStartH)) {
+                                    return { fits: true, uld: uldType, ori: ori, posX: 0, posY: spec.overhangStartH + (ori.y / 2), posZ: 0, method: '상단 적재(양측 오버행 활용)' };
+                                }
+                            } else if (uldType === 'PLA' || uldType === 'PAG' || uldType === 'PMC') {
+                                if (ori.x > spec.baseW && ori.x <= spec.overhangW && ori.z <= spec.baseD) {
+                                    if (shoringHeight >= MIN_SHORING_FOR_OVERHANG) {
+                                        if (ori.y + shoringHeight <= maxHeight) {
+                                            return {
+                                                fits: true, uld: uldType, ori: ori,
+                                                posX: 0, posY: shoringHeight + (ori.y / 2), posZ: 0,
+                                                method: '파렛트 오버행 적재 (하단 서포트 ' + shoringHeight + 'cm 반영)',
+                                                requiresShoring: true, shoringHeight: shoringHeight, shoringWidth: spec.baseW
+                                            };
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+           
+            return { fits: false, largestUld: availableUlds[availableUlds.length - 1] };
+        }
+
+        // --- 5. 화물 3D 객체 생성 함수 ---
+        function createCargo(l, w, h, result) {
+            if (cargoGroup) scene.remove(cargoGroup);
+            cargoGroup = new THREE.Group();
+
+            const cx = result.fits ? result.ori.x : l;
+            const cy = result.fits ? result.ori.y : h;
+            const cz = result.fits ? result.ori.z : w;
+
+            const geometry = new THREE.BoxGeometry(cx, cy, cz);
+           
+            const color = result.fits ? 0x10b981 : 0xef4444;
+            const material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.4, metalness: 0.1 });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            const edges = new THREE.EdgesGeometry(geometry);
+            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 }));
+           
+            cargoGroup.add(mesh);
+            cargoGroup.add(line);
+
+            if (result.requiresShoring) {
+                const sW = result.shoringWidth;
+                const sH = result.shoringHeight;
+                const sD = cz;
+               
+                const shoringGeo = new THREE.BoxGeometry(sW, sH, sD);
+                const shoringMat = new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: 0.9 });
+                const shoringMesh = new THREE.Mesh(shoringGeo, shoringMat);
+               
+                const sEdges = new THREE.EdgesGeometry(shoringGeo);
+                const sLine = new THREE.LineSegments(sEdges, new THREE.LineBasicMaterial({ color: 0x3e2723, linewidth: 1 }));
+                shoringMesh.add(sLine);
+
+                shoringMesh.position.set(0, - (cy / 2) - (sH / 2), 0);
+                cargoGroup.add(shoringMesh);
+            }
+
+            if (result.fits) {
+                cargoGroup.position.set(result.posX, result.posY, result.posZ);
+            } else {
+                cargoGroup.position.set(0, cy / 2, 0);
+            }
+
+            cargoGroup.scale.set(0.01, 0.01, 0.01);
+            scene.add(cargoGroup);
+
+            let scale = 0.01;
+            const animateIn = () => {
+                scale += (1 - scale) * 0.15;
+                cargoGroup.scale.set(scale, scale, scale);
+                if (scale < 0.99) {
+                    requestAnimationFrame(animateIn);
+                } else {
+                    cargoGroup.scale.set(1, 1, 1);
+                }
+            };
+            animateIn();
+        }
+
+        // --- 6. UI 이벤트 및 로직 통합 ---
+        const flightSelect = document.getElementById('flight-id');
+        const descText = document.getElementById('flight-desc');
+        const btnSimulate = document.getElementById('simulate-btn');
+        const resultBox = document.getElementById('result-box');
+        const resultTitle = document.getElementById('result-title');
+        const resultDesc = document.getElementById('result-desc');
+
+        function updateFlightDesc() {
+            const f = FLIGHT_DATA[flightSelect.value];
+            const labelStr = f.ulds.map(u => ULD_SPECS[u].label.split(' ')[0]).join(', ');
+            descText.innerHTML =
+                '<span class="font-bold">기종:</span> ' + f.ac + '<br>' +
+                '<span class="font-bold">데크 위치:</span> ' + f.deck + '<br>' +
+                '<span class="font-bold">탑재단위:</span> ' + labelStr + '<br>' +
+                '<span class="font-bold">Overhang:</span> ' + (f.overhang ? '가능' : '제한/불가');
+        }
+
+        flightSelect.addEventListener('change', () => {
+            updateFlightDesc();
+            resultBox.classList.add('hidden');
+            if(uldGroup) { scene.remove(uldGroup); uldGroup = null; }
+            if(cargoGroup) { scene.remove(cargoGroup); cargoGroup = null; }
+        });
+
+        updateFlightDesc();
+
+        btnSimulate.addEventListener('click', () => {
+            const l = parseFloat(document.getElementById('cargo-l').value);
+            const w = parseFloat(document.getElementById('cargo-w').value);
+            const h = parseFloat(document.getElementById('cargo-h').value);
+            const flightId = flightSelect.value;
+            const allowTilt = document.getElementById('allow-tilt').checked;
+            const shoringHeight = parseFloat(document.getElementById('shoring-h').value) || 0;
+
+            if (!l || !w || !h || l <= 0 || w <= 0 || h <= 0) {
+                showResult(false, '입력 오류', '가로, 세로, 높이에 올바른 양수를 입력해주세요.');
+                return;
+            }
+
+            const result = checkFitForFlight(l, w, h, flightId, allowTilt, shoringHeight);
+           
+            const uldToDraw = result.fits ? result.uld : result.largestUld;
+            createULD(uldToDraw, flightId);
+
+            createCargo(l, w, h, result);
+
+            if (result.fits) {
+                showResult(true, '✅ [' + ULD_SPECS[result.uld].label.split(' ')[0] + '] 탑재 가능!',
+                    '해당 <b>' + ULD_SPECS[result.uld].label + '</b> 구역에 탑재 가능합니다.<br><br>' +
+                    '<b>최적 배치:</b><br>' + result.ori.label + '<br>' +
+                    '<b>탑재 위치:</b> ' + result.method);
+            } else {
+                let hintShoring = 0;
+                // Inner 초과 또는 오버행으로 인한 서포트 부족 검사 (5cm 단위로 테스트)
+                if (shoringHeight < MIN_SHORING_FOR_OVERHANG) {
+                    for (let s = MIN_SHORING_FOR_OVERHANG; s <= 20; s += 5) {
+                        const testResult = checkFitForFlight(l, w, h, flightId, allowTilt, s);
+                        if (testResult.fits) {
+                            hintShoring = s;
+                            break;
+                        }
+                    }
+                }
+
+                if (hintShoring > 0) {
+                    showResult(false, '💡 서포트(Shoring) 높이 부족',
+                        '입력하신 화물은 파렛트의 <b>순수 탑재 공간(Inner)</b> 또는 곡면 윤곽을 초과합니다. 엣지 레일이나 트랙 간섭을 피하기 위해 <b>최소 ' + hintShoring + 'cm 이상의 서포트</b>가 필요합니다. 좌측 옵션을 조정해주세요.');
+                } else {
+                    showResult(false, '❌ 탑재 불가',
+                        '입력하신 화물 규격은 <b>' + FLIGHT_DATA[flightId].ac + ' (' + FLIGHT_DATA[flightId].deck + ')</b>의 어떤 구역에도 탑재할 수 없습니다. ' +
+                        '규격(곡면 윤곽 제한)을 초과했거나, Inner 공간 초과에 따른 필수 서포트를 더하면 기체 최대 높이 제한을 벗어납니다.');
+                }
+            }
+        });
+
+        function showResult(isSuccess, title, desc) {
+            resultBox.className = 'rounded-lg p-4 text-sm font-medium flex flex-col gap-2 mt-2';
+            if (isSuccess) {
+                resultBox.classList.add('bg-green-100', 'text-green-800');
+            } else {
+                if(title.includes('입력 오류') || title.includes('높이 부족')) {
+                    resultBox.classList.add('bg-yellow-100', 'text-yellow-800');
+                } else {
+                    resultBox.classList.add('bg-red-100', 'text-red-800');
+                }
+            }
+            resultTitle.innerHTML = title;
+            resultDesc.innerHTML = desc;
+        }
+
+        // --- 7. 렌더링 루프 및 리사이즈 처리 ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        window.onload = () => {
+            animate();
+            btnSimulate.click();
+        };
+
+    </script>
+</body>
+</html>
