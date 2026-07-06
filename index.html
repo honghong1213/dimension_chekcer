@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D ULD 화물 탑재 시뮬레이터</title>
+    <title>3D ULD 화물 탑재 시뮬레이터_v2</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" integrity="sha512-dLxUelApnYxpLt6K2iomGngnHO83iUvZytA3YjDUCjT0HDOHKXnVYdf3hU4JjM8uEhxf9nD1/ey98U3t2vZ0qQ==" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js" integrity="sha384-wagZhIFgY4hD+7awjQjR4e2E294y6J2HSnd8eTNc15ZubTeQeVRZwhQJ+W6hnBsf" crossorigin="anonymous"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Noto Sans KR', sans-serif; margin: 0; overflow: hidden; background-color: #f3f4f6; }
@@ -154,18 +154,17 @@
             'JL094': { ac: 'B787 여객기', ulds: ['AKE', 'PLA', 'PMC'], overhang: true, maindeck: false, deck: 'Lower Deck' }
         };
 
-        // InnerW, InnerD 속성을 추가하여 네트 체결부 및 엣지 레일로 인해 제한되는 "순수 탑재 공간" 정의
         const ULD_SPECS = {
-            'AKE': { label: 'AKE 컨테이너', baseW: 156, baseD: 153, height: 163, hasOverhang: true, overhangW: 200, overhangStartH: 114 },
-            'DQF': { label: 'DQF 컨테이너', baseW: 244, baseD: 153, height: 163, hasOverhang: true, overhangW: 317, overhangStartH: 114 },
-            'PLA': { label: 'PLA 파렛트', baseW: 317, baseD: 153, innerW: 294, innerD: 130, height: 163, hasOverhang: true, overhangW: 329 },
-            'PAG': { label: 'PAG 파렛트', baseW: 317, baseD: 223, innerW: 294, innerD: 200, height: 163, maindeckHeight: 244, hasOverhang: true, overhangW: 329 },
-            'PMC': { label: 'PMC 파렛트', baseW: 317, baseD: 244, innerW: 294, innerD: 220, height: 163, maindeckHeight: 244, hasOverhang: true, overhangW: 329 },
+            'AKE': { label: 'AKE 컨테이너', baseW: 156, baseD: 153, height: 163, innerW: 146, innerD: 143, innerH: 155, hasOverhang: true, overhangW: 200, innerOverhangW: 190, overhangStartH: 114 },
+            'DQF': { label: 'DQF 컨테이너', baseW: 244, baseD: 153, height: 163, innerW: 234, innerD: 143, innerH: 155, hasOverhang: true, overhangW: 317, innerOverhangW: 307, overhangStartH: 114 },
+            'PLA': { label: 'PLA 파렛트', baseW: 317, baseD: 153, innerW: 294, innerD: 130, height: 160, hasOverhang: true, overhangW: 329 },
+            'PAG': { label: 'PAG 파렛트', baseW: 317, baseD: 223, innerW: 294, innerD: 200, height: 160, maindeckHeight: 244, hasOverhang: true, overhangW: 329 },
+            'PMC': { label: 'PMC 파렛트', baseW: 317, baseD: 244, innerW: 294, innerD: 220, height: 160, maindeckHeight: 244, hasOverhang: true, overhangW: 329 },
             'PAG(MD-SBS)': { label: 'PAG 파렛트 (Side-by-Side)', baseW: 317.5, baseD: 223.5, innerW: 294, innerD: 200, height: 240, isMain: true, hasOverhang: false },
             'PMC(MD-Center)': { label: 'PMC 파렛트 (Center Loading)', baseW: 317.5, baseD: 243.8, innerW: 294, innerD: 220, height: 240, isMain: true, hasOverhang: false }
         };
 
-        const MIN_SHORING_FOR_OVERHANG = 5; // 파렛트 엣지 간섭을 피하기 위한 최소 서포트 두께
+        const MIN_SHORING_FOR_OVERHANG = 5;
 
         function getPAMaxWidth(h) {
             if (h <= 108.4) return 223.5;
@@ -175,7 +174,7 @@
             return 0;
         }
 
-        // --- 3. ULD 생성 함수 ---
+        // --- 3. ULD 생성 및 시각화 ---
         function createULD(type, flightId) {
             if (uldGroup) {
                 scene.remove(uldGroup);
@@ -189,6 +188,7 @@
             const useOverhang = spec.hasOverhang && flight.overhang;
             const maxHeight = (flight.maindeck && spec.maindeckHeight) ? spec.maindeckHeight : spec.height;
             const isPallet = ['PMC', 'PAG', 'PLA', 'PAG(MD-SBS)', 'PMC(MD-Center)'].includes(type);
+            const isContainer = ['AKE', 'DQF'].includes(type);
 
             if (isPallet) {
                 // 1. 파렛트 외부 바닥면 (External base)
@@ -201,14 +201,12 @@
                 baseMesh.add(baseLine);
                 uldGroup.add(baseMesh);
 
-                // 2. 파렛트 Inner 구역 (안전선 표시)
+                // 2. 파렛트 Inner 구역 (녹색 점선 - 순수 탑재 공간)
                 const innerGeo = new THREE.PlaneGeometry(spec.innerW, spec.innerD);
                 innerGeo.rotateX(-Math.PI / 2);
-                innerGeo.translate(0, 4.1, 0); // 바닥보다 살짝 위
+                innerGeo.translate(0, 4.1, 0);
                 const innerMat = new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.1, depthWrite: false });
                 const innerMesh = new THREE.Mesh(innerGeo, innerMat);
-               
-                // 점선 경계선 추가
                 const innerEdges = new THREE.EdgesGeometry(innerGeo);
                 const innerLine = new THREE.LineSegments(innerEdges, new THREE.LineDashedMaterial({ color: 0x059669, dashSize: 5, gapSize: 5, linewidth: 2 }));
                 innerLine.computeLineDistances();
@@ -238,7 +236,7 @@
                     const extrudeSettings = { depth: spec.baseW, bevelEnabled: false };
                     volGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
                     volGeo.translate(0, 0, -spec.baseW / 2);
-                    volGeo.rotateY(-Math.PI / 2); // 317.5(긴 쪽)가 X축을 향하도록 Z-X 평면으로 90도 회전
+                    volGeo.rotateY(-Math.PI / 2);
 
                 } else if (useOverhang) {
                     const shape = new THREE.Shape();
@@ -279,9 +277,10 @@
                 volMesh.add(volLine);
                 uldGroup.add(volMesh);
 
-            } else {
-                let geometry;
-                if (useOverhang && (type === 'AKE' || type === 'DQF')) {
+            } else if (isContainer) {
+                // 1. 외부 형태(External Shell)
+                let extGeo;
+                if (useOverhang) {
                     const shape = new THREE.Shape();
                     const halfBase = spec.baseW / 2;
 
@@ -307,23 +306,87 @@
                         shape.lineTo(-halfBase, 0);
                     }
                     const extrudeSettings = { depth: spec.baseD, bevelEnabled: false };
-                    geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-                    geometry.translate(0, 0, -spec.baseD / 2);
+                    extGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                    extGeo.translate(0, 0, -spec.baseD / 2);
                 } else {
-                    geometry = new THREE.BoxGeometry(spec.baseW, maxHeight, spec.baseD);
-                    geometry.translate(0, maxHeight / 2, 0);
+                    extGeo = new THREE.BoxGeometry(spec.baseW, maxHeight, spec.baseD);
+                    extGeo.translate(0, maxHeight / 2, 0);
                 }
 
-                const material = new THREE.MeshStandardMaterial({
+                const extMat = new THREE.MeshStandardMaterial({
                     color: 0x3b82f6, transparent: true, opacity: 0.15,
                     side: THREE.DoubleSide, depthWrite: false
                 });
-               
-                const mesh = new THREE.Mesh(geometry, material);
-                const edges = new THREE.EdgesGeometry(geometry);
-                const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x1d4ed8, linewidth: 2 }));
-                mesh.add(line);
-                uldGroup.add(mesh);
+                const extMesh = new THREE.Mesh(extGeo, extMat);
+                const extEdges = new THREE.EdgesGeometry(extGeo);
+                const extLine = new THREE.LineSegments(extEdges, new THREE.LineBasicMaterial({ color: 0x1d4ed8, linewidth: 2 }));
+                extMesh.add(extLine);
+                uldGroup.add(extMesh);
+
+                // 2. 내부 적재 가능 구역 (Inner Usable Volume - 녹색 점선 시각화)
+                let innerGeo;
+                if (useOverhang) {
+                    const innerShape = new THREE.Shape();
+                    const halfInner = spec.innerW / 2;
+                    if (type === 'AKE') {
+                        const rightMaxInner = halfInner + (spec.innerOverhangW - spec.innerW);
+                        innerShape.moveTo(-halfInner, 0);
+                        innerShape.lineTo(halfInner, 0);  
+                        innerShape.lineTo(halfInner, spec.overhangStartH);
+                        innerShape.lineTo(rightMaxInner, spec.overhangStartH);
+                        innerShape.lineTo(rightMaxInner, spec.innerH);
+                        innerShape.lineTo(-halfInner, spec.innerH);
+                        innerShape.lineTo(-halfInner, 0);
+                    } else if (type === 'DQF') {
+                        const halfTopInner = spec.innerOverhangW / 2;
+                        innerShape.moveTo(-halfInner, 0);
+                        innerShape.lineTo(halfInner, 0);
+                        innerShape.lineTo(halfInner, spec.overhangStartH);
+                        innerShape.lineTo(halfTopInner, spec.overhangStartH);
+                        innerShape.lineTo(halfTopInner, spec.innerH);
+                        innerShape.lineTo(-halfTopInner, spec.innerH);
+                        innerShape.lineTo(-halfTopInner, spec.overhangStartH);
+                        innerShape.lineTo(-halfInner, spec.overhangStartH);
+                        innerShape.lineTo(-halfInner, 0);
+                    }
+                    const innerExtrudeSettings = { depth: spec.innerD, bevelEnabled: false };
+                    innerGeo = new THREE.ExtrudeGeometry(innerShape, innerExtrudeSettings);
+                    innerGeo.translate(0, 0, -spec.innerD / 2);
+                } else {
+                    innerGeo = new THREE.BoxGeometry(spec.innerW, spec.innerH, spec.innerD);
+                    innerGeo.translate(0, spec.innerH / 2, 0);
+                }
+
+                const innerMat = new THREE.MeshBasicMaterial({ color: 0x10b981, transparent: true, opacity: 0.05, depthWrite: false });
+                const innerMesh = new THREE.Mesh(innerGeo, innerMat);
+                const innerEdges = new THREE.EdgesGeometry(innerGeo);
+                const innerLine = new THREE.LineSegments(innerEdges, new THREE.LineDashedMaterial({ color: 0x059669, dashSize: 5, gapSize: 5, linewidth: 2 }));
+                innerLine.computeLineDistances();
+                innerMesh.add(innerLine);
+                innerMesh.position.y += 0.1;
+                uldGroup.add(innerMesh);
+
+                // 3. 컨테이너 입구 턱(Door Lip) 구조물 시각화 - 위아래 분산 렌더링
+                const lipTotalThickness = maxHeight - spec.innerH;
+                if (lipTotalThickness > 0) {
+                    const lipHalf = lipTotalThickness / 2;
+                    const lipMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.5 }); // 주황색 경고색
+                    const lipEdgeMat = new THREE.LineBasicMaterial({ color: 0xb45309, linewidth: 2 });
+
+                    // 상단 턱 (Top Door Lip)
+                    const topLipGeo = new THREE.BoxGeometry(spec.innerW, lipHalf, 8);
+                    topLipGeo.translate(0, maxHeight - (lipHalf / 2), (spec.baseD / 2) - 4);
+                    const topLipMesh = new THREE.Mesh(topLipGeo, lipMat);
+                    topLipMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(topLipGeo), lipEdgeMat));
+                    uldGroup.add(topLipMesh);
+
+                    // 하단 턱 (Bottom Door Lip)
+                    const botLipGeo = new THREE.BoxGeometry(spec.innerW, lipHalf, 8);
+                    botLipGeo.translate(0, lipHalf / 2, (spec.baseD / 2) - 4);
+                    const botLipMesh = new THREE.Mesh(botLipGeo, lipMat);
+                    botLipMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(botLipGeo), lipEdgeMat));
+                    uldGroup.add(botLipMesh);
+                }
             }
             scene.add(uldGroup);
         }
@@ -358,83 +421,82 @@
                 const maxHeight = (flight.maindeck && spec.maindeckHeight) ? spec.maindeckHeight : spec.height;
                 const useOverhang = spec.hasOverhang && flight.overhang;
                 const isPallet = ['PMC', 'PAG', 'PLA', 'PAG(MD-SBS)', 'PMC(MD-Center)'].includes(uldType);
+                const isContainer = ['AKE', 'DQF'].includes(uldType);
 
                 for (let j = 0; j < orientations.length; j++) {
                     let ori = orientations[j];
                    
-                    // 핵심 수정: Inner 공간 초과 검사 (파렛트 엣지 레일 간섭)
-                    let exceedsInner = false;
-                    if (isPallet) {
+                    if (isContainer) {
+                        // 기본 바닥 적재 확인 (InnerH 155cm 한계 적용)
+                        if (ori.x <= spec.innerW && ori.z <= spec.innerD && (ori.y + shoringHeight) <= spec.innerH) {
+                            return { fits: true, uld: uldType, ori: ori, posX: 0, posY: shoringHeight + (ori.y / 2), posZ: 0, method: shoringHeight > 0 ? '컨테이너 내부 적재 (서포트 포함)' : '컨테이너 내부 기본 적재', requiresShoring: shoringHeight > 0, shoringHeight: shoringHeight, shoringWidth: ori.x };
+                        }
+                        if (useOverhang) {
+                            if (ori.x <= spec.innerOverhangW && ori.z <= spec.innerD && (ori.y + shoringHeight) <= (spec.innerH - spec.overhangStartH)) {
+                                let posX = 0;
+                                if (uldType === 'AKE') {
+                                    posX = (-spec.baseW/2 + (spec.baseW/2 + (spec.overhangW - spec.baseW))) / 2;
+                                }
+                                return { fits: true, uld: uldType, ori: ori, posX: posX, posY: shoringHeight + spec.overhangStartH + (ori.y / 2), posZ: 0, method: '컨테이너 상단 적재(오버행 활용)', requiresShoring: shoringHeight > 0, shoringHeight: shoringHeight, shoringWidth: ori.x };
+                            }
+                        }
+                    } else if (isPallet) {
+                        let exceedsInner = false;
                         if (ori.x > spec.innerW || ori.z > spec.innerD) {
                             exceedsInner = true;
                         }
-                    }
 
-                    // Inner를 초과했는데 서포트가 최소 요구치(5cm) 미만이면 물리적으로 파렛트 바닥에 밀착할 수 없음
-                    if (exceedsInner && shoringHeight < MIN_SHORING_FOR_OVERHANG) {
-                        continue;
-                    }
+                        if (exceedsInner && shoringHeight < MIN_SHORING_FOR_OVERHANG) {
+                            continue;
+                        }
 
-                    if (uldType === 'PAG(MD-SBS)') {
-                        const yMax = ori.y + shoringHeight;
-                        const wMax = getPAMaxWidth(yMax);
-                       
-                        // X축이 긴 쪽(317.5), Z축이 짧은 곡면 쪽(223.5)이므로 ori.z를 곡면 폭(wMax)과 비교
-                        if (ori.x <= spec.baseW && ori.z <= wMax && yMax <= spec.height) {
-                            const leftWallZ = -(spec.baseD / 2);
-                            const posZ = leftWallZ + (ori.z / 2);
+                        if (uldType === 'PAG(MD-SBS)') {
+                            const yMax = ori.y + shoringHeight;
+                            const wMax = getPAMaxWidth(yMax);
                            
-                            let methodText = 'Side-by-Side 곡면 회피 기본 적재';
-                            if (exceedsInner) methodText = `Inner 초과 적재 (서포트 ${shoringHeight}cm 반영)`;
-                            else if (shoringHeight > 0) methodText = `Side-by-Side 곡면 회피 (서포트 포함)`;
+                            if (ori.x <= spec.baseW && ori.z <= wMax && yMax <= spec.height) {
+                                const leftWallZ = -(spec.baseD / 2);
+                                const posZ = leftWallZ + (ori.z / 2);
+                               
+                                let methodText = 'Side-by-Side 곡면 회피 기본 적재';
+                                if (exceedsInner) methodText = `Inner 초과 적재 (서포트 ${shoringHeight}cm 반영)`;
+                                else if (shoringHeight > 0) methodText = `Side-by-Side 곡면 회피 (서포트 포함)`;
 
-                            return {
-                                fits: true, uld: uldType, ori: ori,
-                                posX: 0, posY: shoringHeight + (ori.y / 2), posZ: posZ,
-                                method: methodText,
-                                requiresShoring: shoringHeight > 0, shoringHeight: shoringHeight, shoringWidth: ori.x
-                            };
-                        }
-                    } else if (uldType === 'PMC(MD-Center)') {
-                        if (ori.x <= spec.baseW && ori.z <= spec.baseD && (ori.y + shoringHeight) <= spec.height) {
-                            let methodText = 'Center Loading 기본 적재';
-                            if (exceedsInner) methodText = `Inner 초과 적재 (서포트 ${shoringHeight}cm 반영)`;
-                            else if (shoringHeight > 0) methodText = `Center Loading (서포트 포함)`;
+                                return {
+                                    fits: true, uld: uldType, ori: ori,
+                                    posX: 0, posY: shoringHeight + (ori.y / 2), posZ: posZ,
+                                    method: methodText,
+                                    requiresShoring: shoringHeight > 0, shoringHeight: shoringHeight, shoringWidth: ori.x
+                                };
+                            }
+                        } else if (uldType === 'PMC(MD-Center)') {
+                            if (ori.x <= spec.baseW && ori.z <= spec.baseD && (ori.y + shoringHeight) <= spec.height) {
+                                let methodText = 'Center Loading 기본 적재';
+                                if (exceedsInner) methodText = `Inner 초과 적재 (서포트 ${shoringHeight}cm 반영)`;
+                                else if (shoringHeight > 0) methodText = `Center Loading (서포트 포함)`;
 
-                            return {
-                                fits: true, uld: uldType, ori: ori,
-                                posX: 0, posY: shoringHeight + (ori.y / 2), posZ: 0,
-                                method: methodText,
-                                requiresShoring: shoringHeight > 0, shoringHeight: shoringHeight, shoringWidth: ori.x
-                            };
-                        }
-                    } else {
-                        // 로어데크 기본 적재 (Inner 한계 포함)
-                        if (ori.x <= spec.baseW && ori.z <= spec.baseD && (ori.y + shoringHeight) <= maxHeight) {
-                            let methodText = '바닥 기본 적재';
-                            if (exceedsInner) methodText = `Inner 초과 적재 (서포트 ${shoringHeight}cm 반영)`;
-                            else if (shoringHeight > 0) methodText = `바닥 적재 (서포트 포함)`;
+                                return {
+                                    fits: true, uld: uldType, ori: ori,
+                                    posX: 0, posY: shoringHeight + (ori.y / 2), posZ: 0,
+                                    method: methodText,
+                                    requiresShoring: shoringHeight > 0, shoringHeight: shoringHeight, shoringWidth: ori.x
+                                };
+                            }
+                        } else {
+                            if (ori.x <= spec.baseW && ori.z <= spec.baseD && (ori.y + shoringHeight) <= maxHeight) {
+                                let methodText = '바닥 기본 적재';
+                                if (exceedsInner) methodText = `Inner 초과 적재 (서포트 ${shoringHeight}cm 반영)`;
+                                else if (shoringHeight > 0) methodText = `바닥 적재 (서포트 포함)`;
 
-                            return {
-                                fits: true, uld: uldType, ori: ori,
-                                posX: 0, posY: shoringHeight + (ori.y / 2), posZ: 0,
-                                method: methodText,
-                                requiresShoring: shoringHeight > 0, shoringHeight: shoringHeight, shoringWidth: ori.x
-                            };
-                        }
+                                return {
+                                    fits: true, uld: uldType, ori: ori,
+                                    posX: 0, posY: shoringHeight + (ori.y / 2), posZ: 0,
+                                    method: methodText,
+                                    requiresShoring: shoringHeight > 0, shoringHeight: shoringHeight, shoringWidth: ori.x
+                                };
+                            }
 
-                        // 로어데크 파렛트 폭 오버행
-                        if (useOverhang) {
-                            if (uldType === 'AKE') {
-                                if (ori.x <= spec.overhangW && ori.z <= spec.baseD && ori.y <= (maxHeight - spec.overhangStartH)) {
-                                    const centerOfTop = (-spec.baseW/2 + (spec.baseW/2 + (spec.overhangW - spec.baseW))) / 2;
-                                    return { fits: true, uld: uldType, ori: ori, posX: centerOfTop, posY: spec.overhangStartH + (ori.y / 2), posZ: 0, method: '상단 적재(오버행 활용)' };
-                                }
-                            } else if (uldType === 'DQF') {
-                                if (ori.x <= spec.overhangW && ori.z <= spec.baseD && ori.y <= (maxHeight - spec.overhangStartH)) {
-                                    return { fits: true, uld: uldType, ori: ori, posX: 0, posY: spec.overhangStartH + (ori.y / 2), posZ: 0, method: '상단 적재(양측 오버행 활용)' };
-                                }
-                            } else if (uldType === 'PLA' || uldType === 'PAG' || uldType === 'PMC') {
+                            if (useOverhang) {
                                 if (ori.x > spec.baseW && ori.x <= spec.overhangW && ori.z <= spec.baseD) {
                                     if (shoringHeight >= MIN_SHORING_FOR_OVERHANG) {
                                         if (ori.y + shoringHeight <= maxHeight) {
@@ -572,13 +634,16 @@
                     '<b>탑재 위치:</b> ' + result.method);
             } else {
                 let hintShoring = 0;
-                // Inner 초과 또는 오버행으로 인한 서포트 부족 검사 (5cm 단위로 테스트)
-                if (shoringHeight < MIN_SHORING_FOR_OVERHANG) {
-                    for (let s = MIN_SHORING_FOR_OVERHANG; s <= 20; s += 5) {
-                        const testResult = checkFitForFlight(l, w, h, flightId, allowTilt, s);
-                        if (testResult.fits) {
-                            hintShoring = s;
-                            break;
+               
+                const largestUld = result.largestUld;
+                if (largestUld && ['PMC', 'PAG', 'PLA', 'PAG(MD-SBS)', 'PMC(MD-Center)'].includes(largestUld)) {
+                    if (shoringHeight < MIN_SHORING_FOR_OVERHANG) {
+                        for (let s = MIN_SHORING_FOR_OVERHANG; s <= 20; s += 5) {
+                            const testResult = checkFitForFlight(l, w, h, flightId, allowTilt, s);
+                            if (testResult.fits) {
+                                hintShoring = s;
+                                break;
+                            }
                         }
                     }
                 }
@@ -589,7 +654,7 @@
                 } else {
                     showResult(false, '❌ 탑재 불가',
                         '입력하신 화물 규격은 <b>' + FLIGHT_DATA[flightId].ac + ' (' + FLIGHT_DATA[flightId].deck + ')</b>의 어떤 구역에도 탑재할 수 없습니다. ' +
-                        '규격(곡면 윤곽 제한)을 초과했거나, Inner 공간 초과에 따른 필수 서포트를 더하면 기체 최대 높이 제한을 벗어납니다.');
+                        '규격(내측 Inner 공간 한계 / 컨테이너 턱 / 곡면 윤곽)을 초과했거나, 서포트를 더하면 기체 최대 높이 제한을 벗어납니다.');
                 }
             }
         });
